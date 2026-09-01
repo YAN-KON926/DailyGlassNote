@@ -103,6 +103,7 @@ namespace DailyStickyNative
             requestedMode = initialMode;
             store = LoadStore();
             if (storageId != "main" && !File.Exists(DataPath())) store.Open = true;
+            if (storageId == "main" && store.Settings.LaunchAtLogin && !SetStartup(true)) store.Settings.LaunchAtLogin = false;
             if (!string.IsNullOrWhiteSpace(initialMode) && string.IsNullOrWhiteSpace(store.Settings.Mode)) store.Settings.Mode = initialMode;
             observedToday = DateKey(DateTime.Now);
             selectedDate = observedToday;
@@ -431,7 +432,18 @@ namespace DailyStickyNative
             MenuItem locked = new MenuItem { Header = "锁定位置", IsCheckable = true, IsChecked = store.Settings.Locked };
             locked.Click += delegate { store.Settings.Locked = locked.IsChecked; SaveStore(); };
             MenuItem startup = new MenuItem { Header = "开机启动", IsCheckable = true, IsChecked = store.Settings.LaunchAtLogin };
-            startup.Click += delegate { store.Settings.LaunchAtLogin = startup.IsChecked; SetStartup(startup.IsChecked); SaveStore(); };
+            startup.Click += delegate
+            {
+                bool requested = startup.IsChecked;
+                if (SetStartup(requested)) store.Settings.LaunchAtLogin = requested;
+                else
+                {
+                    startup.IsChecked = !requested;
+                    store.Settings.LaunchAtLogin = !requested;
+                    MessageBox.Show(this, "无法写入 Windows 开机启动项。请检查当前账户权限或在任务管理器的“启动”页面确认该程序未被禁用。", "开机启动设置失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                SaveStore();
+            };
             MenuItem newTask = new MenuItem { Header = "新建任务便签" };
             newTask.Click += delegate { CreateAdditionalSticky("tasks"); };
             MenuItem newText = new MenuItem { Header = "新建文字便签" };
@@ -947,7 +959,21 @@ namespace DailyStickyNative
         private string DateKey(DateTime date) { return date.ToString("yyyy-MM-dd"); }
         private DateTime ParseDate(string key) { return DateTime.ParseExact(key, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture); }
         private double Clamp(double value, double min, double max, double fallback) { if (double.IsNaN(value) || value == 0) value = fallback; return Math.Max(min, Math.Min(max, value)); }
-        private Color ThemeColor() { byte tone = (byte)(Math.Max(0, Math.Min(5, store.Settings.TextTone)) * 51); return Color.FromRgb(tone, tone, tone); }
+        private Color ThemeColor()
+        {
+            int selected = Math.Max(0, Math.Min(5, store.Settings.TextTone)) * 51;
+            // A nearly opaque white glass layer and white text have no usable
+            // contrast on bright desktops. Keep the chosen light tone at normal
+            // glass levels, then smoothly darken only the rendered text as the
+            // white veil becomes dense. No outline or shadow is added.
+            if (store.Settings.TextTone >= 4 && store.Settings.GlassOpacity > .55)
+            {
+                double mix = Math.Min(1, (store.Settings.GlassOpacity - .55) / .45);
+                selected = (int)Math.Round(selected + (55 - selected) * mix);
+            }
+            byte tone = (byte)Math.Max(0, Math.Min(255, selected));
+            return Color.FromRgb(tone, tone, tone);
+        }
         private Brush ThemeBrush() { return new SolidColorBrush(ThemeColor()); }
 
         private void PreviewAppearance(int tone, double opacity)
@@ -1153,17 +1179,74 @@ namespace DailyStickyNative
             SaveStore();
         }
 
-        private void SetStartup(bool enabled)
+        private bool SetStartup(bool enabled)
         {
+            const string valueName = "DailySticky";
+            string currentExecutable = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            string installDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DailyGlassNote");
+            string installedExecutable = System.IO.Path.Combine(installDirectory, "DailyGlassNote.exe");
+            string executable = currentExecutable;
+            string startupDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+            string shortcutPath = System.IO.Path.Combine(startupDirectory, "DailyGlassNote.lnk");
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", true))
+                if (enabled)
                 {
-                    if (enabled) key.SetValue("DailySticky", "\"" + System.Reflection.Assembly.GetExecutingAssembly().Location + "\"");
-                    else key.DeleteValue("DailySticky", false);
+                    try
+                    {
+                        Directory.CreateDirectory(installDirectory);
+                        if (!string.Equals(currentExecutable, installedExecutable, StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Copy(currentExecutable, installedExecutable, true);
+                            string sourceIcon = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(currentExecutable), "daily-note-badge-04.ico");
+                            if (File.Exists(sourceIcon)) File.Copy(sourceIcon, System.IO.Path.Combine(installDirectory, "daily-note-badge-04.ico"), true);
+                        }
+                        executable = installedExecutable;
+                    }
+                    catch
+                    {
+                        if (File.Exists(installedExecutable)) executable = installedExecutable;
+                    }
+
+                    bool shortcutReady = false;
+                    bool registryReady = false;
+                    try
+                    {
+                        Directory.CreateDirectory(startupDirectory);
+                        Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                        if (shellType != null)
+                        {
+                            object shell = Activator.CreateInstance(shellType);
+                            object shortcut = shellType.InvokeMember("CreateShortcut", System.Reflection.BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
+                            Type shortcutType = shortcut.GetType();
+                            shortcutType.InvokeMember("TargetPath", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { executable });
+                            shortcutType.InvokeMember("Arguments", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { "--startup" });
+                            shortcutType.InvokeMember("WorkingDirectory", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { System.IO.Path.GetDirectoryName(executable) });
+                            shortcutType.InvokeMember("Description", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { "DailyGlassNote 每日便签" });
+                            shortcutType.InvokeMember("IconLocation", System.Reflection.BindingFlags.SetProperty, null, shortcut, new object[] { executable + ",0" });
+                            shortcutType.InvokeMember("Save", System.Reflection.BindingFlags.InvokeMethod, null, shortcut, null);
+                            if (Marshal.IsComObject(shortcut)) Marshal.FinalReleaseComObject(shortcut);
+                            if (Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
+                        }
+                        shortcutReady = File.Exists(shortcutPath);
+                    }
+                    catch { }
+                    try
+                    {
+                        using (RegistryKey key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run", RegistryKeyPermissionCheck.ReadWriteSubTree))
+                        {
+                            string command = "\"" + executable + "\" --startup";
+                            if (key != null) { key.SetValue(valueName, command, RegistryValueKind.String); registryReady = string.Equals(Convert.ToString(key.GetValue(valueName, "")), command, StringComparison.OrdinalIgnoreCase); }
+                        }
+                    }
+                    catch { }
+                    return shortcutReady || registryReady;
                 }
+                try { if (File.Exists(shortcutPath)) File.Delete(shortcutPath); } catch { }
+                try { using (RegistryKey key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) if (key != null) key.DeleteValue(valueName, false); } catch { }
+                return !File.Exists(shortcutPath);
             }
-            catch { }
+            catch { return false; }
         }
 
         [StructLayout(LayoutKind.Sequential)] private struct AccentPolicy { public int AccentState; public int AccentFlags; public int GradientColor; public int AnimationId; }
@@ -1643,6 +1726,18 @@ namespace DailyStickyNative
         public static bool Exiting { get; private set; }
         private static bool exiting;
         private static Forms.NotifyIcon tray;
+        private static System.Threading.Mutex singleInstance;
+
+        private static void WriteStartupLog(string message)
+        {
+            try
+            {
+                string directory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "daily-sticky");
+                Directory.CreateDirectory(directory);
+                File.AppendAllText(System.IO.Path.Combine(directory, "startup.log"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + message + Environment.NewLine, Encoding.UTF8);
+            }
+            catch { }
+        }
 
         private static Drawing.Bitmap CreateTrayIcon()
         {
@@ -1672,8 +1767,23 @@ namespace DailyStickyNative
         }
 
         [STAThread]
-        public static void Main()
+        public static void Main(string[] args)
         {
+            WriteStartupLog("invoked; args=" + string.Join(" ", args ?? new string[0]) + "; exe=" + System.Reflection.Assembly.GetExecutingAssembly().Location);
+            if (args != null && Array.Exists(args, delegate(string value) { return string.Equals(value, "--startup", StringComparison.OrdinalIgnoreCase); }))
+            {
+                WriteStartupLog("login launch detected; waiting 10 seconds");
+                System.Threading.Thread.Sleep(10000);
+            }
+            bool createdNew;
+            singleInstance = new System.Threading.Mutex(true, "DailyGlassNote.SingleInstance", out createdNew);
+            if (!createdNew)
+            {
+                WriteStartupLog("another instance is already running; exit");
+                return;
+            }
+            try
+            {
             Application app = new Application { ShutdownMode = ShutdownMode.OnLastWindowClose };
             DailyStickyWindow main = new DailyStickyWindow();
             main.Closing += delegate(object sender, System.ComponentModel.CancelEventArgs e)
@@ -1703,6 +1813,16 @@ namespace DailyStickyNative
             // intentionally not auto-opened. This prevents closed notes from
             // reappearing in bulk on the next launch.
             app.Run();
+            }
+            catch (Exception ex)
+            {
+                WriteStartupLog("fatal: " + ex);
+                try { Forms.MessageBox.Show("每日便签启动失败，错误已记录到：\n" + System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "daily-sticky", "startup.log"), "每日便签"); } catch { }
+            }
+            finally
+            {
+                if (singleInstance != null) { try { singleInstance.ReleaseMutex(); } catch { } singleInstance.Dispose(); }
+            }
         }
     }
 }
