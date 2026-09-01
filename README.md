@@ -1,6 +1,6 @@
 # DailyGlassNote
 
-A lightweight frosted-glass daily task and text note app for Windows 10/11.
+A lightweight frosted-glass daily task and text note app for Windows 10.
 
 ![DailyGlassNote preview](docs/images/dailyglassnote-preview.png)
 
@@ -23,7 +23,7 @@ DailyGlassNote is a portable Windows desktop sticky-note application that combin
 
 Download `dist/每日便签-Windows.zip`, extract it, and run `每日便签.exe`.
 
-Recommended environment: 64-bit Windows 10 or Windows 11.
+Supported environment: 64-bit Windows 10. Windows 11 is not currently supported.
 
 ## Build from source
 
@@ -47,6 +47,6 @@ The frosted-glass appearance depends on Windows desktop composition and graphics
 
 ## 中文说明
 
-DailyGlassNote（每日玻璃便签）是一款适用于 Windows 10/11 的轻量级透明磨砂桌面便签，支持每日任务、文字记录、三色状态、任务顺延、备注、拖动排序、多便签和外观调节。
+DailyGlassNote（每日玻璃便签）是一款仅适用于 Windows 10 的轻量级透明磨砂桌面便签，支持每日任务、文字记录、三色状态、任务顺延、备注、拖动排序、多便签和外观调节。目前不支持 Windows 11。
 
 下载 `dist/每日便签-Windows.zip`，解压后运行 `每日便签.exe` 即可。任务和便签内容仅保存在本机 `%AppData%\daily-sticky`，仓库中不包含用户数据。
