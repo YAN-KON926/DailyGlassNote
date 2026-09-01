@@ -43,6 +43,13 @@ Tasks, notes, text content, and window settings are stored locally in `%AppData%
 
 The frosted-glass appearance depends on Windows desktop composition and graphics drivers. Under Remote Desktop or certain system configurations, the effect may fall back to ordinary transparency.
 
+## Project documentation
+
+- [Product specification](PROJECT_SPEC.md)
+- [Visual reference](VISUAL_REFERENCE.md)
+- [Release test checklist](TEST_CHECKLIST.md)
+- [Windows 11 porting guide](WIN11_PORTING.md)
+
 ---
 
 ## 中文说明
